@@ -30,7 +30,8 @@
   },
   "Sources": {
     "provision": "./provision",
-    "provision.sh": "./provision.sh"
+    "provision.sh": "./provision.sh",
+    "provision-fixup.sh": "./provision-fixup.sh"
   },
   "Steps": {
     "create-disk": {
@@ -40,7 +41,52 @@
           "SourceImage": "${source_image}",
           "SizeGb": "100",
           "Type": "pd-ssd"
+        },
+	{
+	  "Name": "patch-disk",
+	  "SourceImage": "projects/debian-cloud/global/images/family/debian-11",
+	  "SizeGb": "10",
+	  "Type": "pd-ssd"
+	}
+      ]
+    },
+    "create-patch-instance": {
+      "CreateInstances": [
+        {
+          "Name": "patch-instance",
+          "Disks": [
+            {"Source": "patch-disk"},
+            {"Source": "disk"}
+          ],
+          "MachineType": "n1-standard-4",
+          "StartupScript": "provision-fixup.sh",
+          "NetworkInterfaces": [{
+            "Network": "${network}",
+	    "Subnetwork": "${subnet}"
+          }]
         }
+      ]
+    },
+    "patch-wait-for-script": {
+      "WaitForInstancesSignal": [
+        {
+          "Name": "patch-instance",
+          "SerialOutput": {
+            "Port": 1,
+            "SuccessMatch": "DaisySuccess:",
+            "FailureMatch": "DaisyFailure:",
+            "StatusMatch": "DaisyStatus:"
+          }
+        }
+      ],
+      "Timeout": "45m"
+    },
+    "detach-disk": {
+      "DetachDisks": [
+        {
+	  "DeviceName": "disk",
+	  "Instance": "patch-instance"
+	}
       ]
     },
     "create-instance": {
@@ -94,13 +140,16 @@
     },
     "cleanup": {
       "DeleteResources": {
-          "Instances": ["instance"],
-          "Disks": ["disk"]
+          "Instances": ["instance", "patch-instance"],
+          "Disks": ["disk", "patch-disk"]
       }
     }
   },
   "Dependencies": {
-    "create-instance": ["create-disk"],
+    "create-patch-instance": ["create-disk"],
+    "patch-wait-for-script": ["create-patch-instance"],
+    "detach-disk": ["patch-wait-for-script"],
+    "create-instance": ["detach-disk"],
     "wait-for-script": ["create-instance"],
     "stop-instance": ["wait-for-script"],    
     "create-image": ["stop-instance"],
